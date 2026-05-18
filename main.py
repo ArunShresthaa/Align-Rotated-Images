@@ -46,7 +46,8 @@ class ImageUprightApp:
         try:
             self.root.lift()
             # focus after a short delay so the window has time to appear
-            self.root.after(150, lambda: (self.root.focus_force(), self.image_label.focus_set()))
+            self.root.after(150, lambda: (
+                self.root.focus_force(), self.image_label.focus_set()))
         except Exception:
             pass
 
@@ -74,7 +75,7 @@ class ImageUprightApp:
 
         self.help_label = tk.Label(
             top_frame,
-            text="Left/Right: Previous/Next image | Up/Down: Rotate -90/+90 and save",
+            text="Left/Right: Previous/Next image | Up/Down: Rotate 180 and save | Bulk buttons: rotate landscape images",
             anchor="e",
             fg="#333333",
         )
@@ -109,6 +110,20 @@ class ImageUprightApp:
             controls, text="Rotate Right", command=lambda: self.rotate_current(90))
         self.rotate_right_button.pack(side="left", padx=5)
 
+        self.bulk_rotate_left_button = tk.Button(
+            controls,
+            text="Bulk Rotate -90",
+            command=lambda: self.bulk_rotate_landscape(-90),
+        )
+        self.bulk_rotate_left_button.pack(side="left", padx=15)
+
+        self.bulk_rotate_right_button = tk.Button(
+            controls,
+            text="Bulk Rotate +90",
+            command=lambda: self.bulk_rotate_landscape(90),
+        )
+        self.bulk_rotate_right_button.pack(side="left", padx=5)
+
         self.quit_button = tk.Button(
             controls, text="Quit", command=self.root.quit)
         self.quit_button.pack(side="right", padx=5)
@@ -126,9 +141,9 @@ class ImageUprightApp:
         elif event.keysym == "Right":
             self.show_next()
         elif event.keysym == "Up":
-            self.rotate_current(-90)
+            self.rotate_current(180)
         elif event.keysym == "Down":
-            self.rotate_current(90)
+            self.rotate_current(180)
 
     def _on_resize(self, _event):
         if self.current_image is not None:
@@ -150,6 +165,9 @@ class ImageUprightApp:
         except Exception as exc:
             messagebox.showerror(
                 "Error", f"Could not open image:\n{path}\n\n{exc}")
+
+    def _is_landscape(self, image: Image.Image) -> bool:
+        return image.width > image.height
 
     def _display_image(self, image: Image.Image):
         # Keep aspect ratio while fitting image to the available canvas size.
@@ -197,6 +215,33 @@ class ImageUprightApp:
         except Exception as exc:
             messagebox.showerror(
                 "Save Error", f"Could not save image:\n{path}\n\n{exc}")
+
+    def bulk_rotate_landscape(self, degrees: int):
+        rotated_count = 0
+
+        for path in self.image_paths:
+            try:
+                with Image.open(path) as image:
+                    if not self._is_landscape(image):
+                        continue
+
+                    rotated = image.rotate(degrees, expand=True)
+                    rotated.save(path)
+                    rotated_count += 1
+            except Exception as exc:
+                messagebox.showerror(
+                    "Bulk Rotate Error", f"Could not rotate image:\n{path}\n\n{exc}"
+                )
+                return
+
+        self._show_current_image()
+        self.status_label.config(
+            text=(
+                f"{self.current_index + 1}/{len(self.image_paths)} - "
+                f"{self.image_paths[self.current_index].name} "
+                f"(bulk rotated {rotated_count} images)"
+            )
+        )
 
 
 def choose_folder() -> Path | None:
