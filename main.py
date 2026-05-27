@@ -188,7 +188,15 @@ class ImageUprightApp:
         rotated = self.current_image.rotate(degrees, expand=True)
 
         try:
-            rotated.save(path)
+            save_kwargs = {}
+            if "exif" in self.current_image.info:
+                save_kwargs["exif"] = self.current_image.info["exif"]
+            
+            if path.suffix.lower() in {".jpg", ".jpeg"}:
+                save_kwargs["quality"] = "keep"
+                save_kwargs["subsampling"] = "keep"
+
+            rotated.save(path, **save_kwargs)
             self.current_image = rotated
             self._display_image(self.current_image)
             self.status_label.config(
