@@ -1,4 +1,6 @@
 import argparse
+import concurrent.futures
+import os
 import sys
 from pathlib import Path
 import tkinter as tk
@@ -58,6 +60,29 @@ class ImageUprightApp:
         except Exception:
             pass
 
+    @staticmethod
+    def _convert_single(p: Path):
+        try:
+            with Image.open(p) as img:
+                png_path = p.with_suffix(".png")
+                img.save(png_path)
+            p.unlink()  # delete the original
+            return True, p
+        except Exception as exc:
+            return False, (p, exc)
+
+    @staticmethod
+    def _rotate_single(path: Path, degrees: int):
+        try:
+            with Image.open(path) as img:
+                if img.width > img.height:
+                    rotated = img.rotate(degrees, expand=True)
+                    rotated.save(path)
+                    return True, path, True
+            return True, path, False
+        except Exception as exc:
+            return False, path, exc
+
     def _check_and_convert_to_png(self) -> bool:
         paths = self._load_image_paths(self.folder)
         non_pngs = [p for p in paths if p.suffix.lower() != ".png"]
@@ -89,21 +114,18 @@ class ImageUprightApp:
             progress.pack(pady=10)
             progress["maximum"] = len(non_pngs)
 
-            for i, p in enumerate(non_pngs):
-                try:
-                    with Image.open(p) as img:
-                        save_kwargs = {}
-                        if "exif" in img.info:
-                            save_kwargs["exif"] = img.info["exif"]
-                        png_path = p.with_suffix(".png")
-                        img.save(png_path, **save_kwargs)
-                    p.unlink()  # delete the original
-                except Exception as exc:
-                    print(f"Failed to convert {p}: {exc}")
+            max_workers = min(32, (os.cpu_count() or 4) * 2)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = [executor.submit(self._convert_single, p)
+                           for p in non_pngs]
+                for i, future in enumerate(concurrent.futures.as_completed(futures)):
+                    success, res = future.result()
+                    if not success:
+                        print(f"Failed to convert {res[0]}: {res[1]}")
 
-                progress["value"] = i + 1
-                lbl.config(text=f"Converted {i + 1}/{len(non_pngs)}")
-                progress_window.update()
+                    progress["value"] = i + 1
+                    lbl.config(text=f"Converted {i + 1}/{len(non_pngs)}")
+                    progress_window.update()
 
             progress_window.destroy()
         else:
@@ -265,27 +287,21 @@ class ImageUprightApp:
         progress["maximum"] = len(self.image_paths)
 
         rotated_count = 0
-        for i, path in enumerate(self.image_paths):
-            try:
-                with Image.open(path) as img:
-                    if img.width > img.height:
-                        rotated = img.rotate(degrees, expand=True)
-                        save_kwargs = {}
-                        if "exif" in img.info:
-                            save_kwargs["exif"] = img.info["exif"]
-
-                        if path.suffix.lower() in {".jpg", ".jpeg"}:
-                            save_kwargs["quality"] = "keep"
-                            save_kwargs["subsampling"] = "keep"
-
-                        rotated.save(path, **save_kwargs)
+        max_workers = min(32, (os.cpu_count() or 4) * 2)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(
+                self._rotate_single, path, degrees) for path in self.image_paths]
+            for i, future in enumerate(concurrent.futures.as_completed(futures)):
+                success, path, res = future.result()
+                if success:
+                    if res:
                         rotated_count += 1
-            except Exception as exc:
-                print(f"Failed to bulk rotate {path}: {exc}")
+                else:
+                    print(f"Failed to bulk rotate {path}: {res}")
 
-            progress["value"] = i + 1
-            lbl.config(text=f"Processed {i + 1}/{len(self.image_paths)}")
-            progress_window.update()
+                progress["value"] = i + 1
+                lbl.config(text=f"Processed {i + 1}/{len(self.image_paths)}")
+                progress_window.update()
 
         progress_window.destroy()
 
@@ -303,15 +319,7 @@ class ImageUprightApp:
         rotated = self.current_image.rotate(degrees, expand=True)
 
         try:
-            save_kwargs = {}
-            if "exif" in self.current_image.info:
-                save_kwargs["exif"] = self.current_image.info["exif"]
-
-            if path.suffix.lower() in {".jpg", ".jpeg"}:
-                save_kwargs["quality"] = "keep"
-                save_kwargs["subsampling"] = "keep"
-
-            rotated.save(path, **save_kwargs)
+            rotated.save(path)
             self.current_image = rotated
             self._display_image(self.current_image)
             self.status_label.config(
