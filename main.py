@@ -112,7 +112,7 @@ class ImageUprightApp:
 
         self.help_label = tk.Label(
             top_frame,
-            text="Left/Right: Previous/Next image | Up/Down: Rotate -90/+90 and save",
+            text="Left/Right: Previous/Next image | Up/Down: Rotate 180 and save",
             anchor="e",
             fg="#333333",
         )
@@ -147,6 +147,14 @@ class ImageUprightApp:
             controls, text="Rotate Right", command=lambda: self.rotate_current(90))
         self.rotate_right_button.pack(side="left", padx=5)
 
+        self.bulk_rotate_left_button = tk.Button(
+            controls, text="Bulk Rotate Left", command=lambda: self.bulk_rotate(-90))
+        self.bulk_rotate_left_button.pack(side="left", padx=15)
+
+        self.bulk_rotate_right_button = tk.Button(
+            controls, text="Bulk Rotate Right", command=lambda: self.bulk_rotate(90))
+        self.bulk_rotate_right_button.pack(side="left", padx=5)
+
         self.quit_button = tk.Button(
             controls, text="Quit", command=self.root.quit)
         self.quit_button.pack(side="right", padx=5)
@@ -163,10 +171,8 @@ class ImageUprightApp:
             self.show_previous()
         elif event.keysym == "Right":
             self.show_next()
-        elif event.keysym == "Up":
-            self.rotate_current(-90)
-        elif event.keysym == "Down":
-            self.rotate_current(90)
+        elif event.keysym in ("Up", "Down"):
+            self.rotate_current(180)
 
     def _on_resize(self, _event):
         if self.current_image is not None:
@@ -215,6 +221,32 @@ class ImageUprightApp:
             return
         self.current_index = (self.current_index + 1) % len(self.image_paths)
         self._show_current_image()
+
+    def bulk_rotate(self, degrees: int):
+        if not messagebox.askyesno("Confirm Bulk Rotate", f"Rotate ALL LANDSCAPE images by {degrees} degrees?\nThis might take a moment."):
+            return
+
+        rotated_count = 0
+        for path in self.image_paths:
+            try:
+                with Image.open(path) as img:
+                    if img.width > img.height:
+                        rotated = img.rotate(degrees, expand=True)
+                        save_kwargs = {}
+                        if "exif" in img.info:
+                            save_kwargs["exif"] = img.info["exif"]
+                        
+                        if path.suffix.lower() in {".jpg", ".jpeg"}:
+                            save_kwargs["quality"] = "keep"
+                            save_kwargs["subsampling"] = "keep"
+
+                        rotated.save(path, **save_kwargs)
+                        rotated_count += 1
+            except Exception as exc:
+                print(f"Failed to bulk rotate {path}: {exc}")
+
+        self._show_current_image()
+        messagebox.showinfo("Done", f"Successfully rotated {rotated_count} landscape images.")
 
     def rotate_current(self, degrees: int):
         if self.current_image is None:
