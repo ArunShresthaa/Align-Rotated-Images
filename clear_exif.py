@@ -1,4 +1,5 @@
 import argparse
+import concurrent.futures
 import sys
 from pathlib import Path
 import tkinter as tk
@@ -41,6 +42,37 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _process_image(path: Path):
+    temp_path = path.with_suffix(path.suffix + ".tmp")
+    try:
+        with Image.open(path) as img:
+            # Check for either the raw exif info block or the parsed getexif()
+            has_exif = ("exif" in img.info) or bool(img.getexif())
+
+            if not has_exif:
+                return path, "skipped", None
+
+            save_kwargs = {
+                "format": img.format
+            }
+            if path.suffix.lower() in {".jpg", ".jpeg"}:
+                save_kwargs["quality"] = "keep"
+                save_kwargs["subsampling"] = "keep"
+
+            # By default, PIL won't write EXIF unless explicitly passed 'exif' keyword arg
+            img.save(temp_path, **save_kwargs)
+
+        # Atomically replace the original with the EXIF-cleared version
+        temp_path.replace(path)
+        return path, "processed", None
+
+    except Exception as exc:
+        # Clean up the temp file if it failed midway
+        if temp_path.exists():
+            temp_path.unlink()
+        return path, "failed", exc
+
+
 def main():
     args = parse_args()
     folder = Path(args.folder).expanduser() if args.folder else None
@@ -72,39 +104,19 @@ def main():
     print(
         f"Scanning {len(image_paths)} images for EXIF data in '{folder.name}'...")
 
-    for i, path in enumerate(image_paths, 1):
-        temp_path = path.with_suffix(path.suffix + ".tmp")
-        try:
-            with Image.open(path) as img:
-                # Check for either the raw exif info block or the parsed getexif()
-                has_exif = ("exif" in img.info) or bool(img.getexif())
-
-                if not has_exif:
-                    skipped += 1
-                    continue
-
-                save_kwargs = {
-                    "format": img.format
-                }
-                if path.suffix.lower() in {".jpg", ".jpeg"}:
-                    save_kwargs["quality"] = "keep"
-                    save_kwargs["subsampling"] = "keep"
-
-                # By default, PIL won't write EXIF unless explicitly passed 'exif' keyword arg
-                img.save(temp_path, **save_kwargs)
-
-            # Atomically replace the original with the EXIF-cleared version
-            temp_path.replace(path)
-
-            processed += 1
-            print(f"[{i}/{len(image_paths)}] Cleared EXIF: {path.name}")
-
-        except Exception as exc:
-            # Clean up the temp file if it failed midway
-            if temp_path.exists():
-                temp_path.unlink()
-            print(f"[{i}/{len(image_paths)}] Failed to process {path.name}: {exc}")
-            failed += 1
+    max_workers = min(32, (os.cpu_count() or 4) * 2)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(_process_image, p) for p in image_paths]
+        for i, future in enumerate(concurrent.futures.as_completed(futures), 1):
+            path, status, exc = future.result()
+            if status == "processed":
+                processed += 1
+                print(f"[{i}/{len(image_paths)}] Cleared EXIF: {path.name}")
+            elif status == "skipped":
+                skipped += 1
+            elif status == "failed":
+                failed += 1
+                print(f"[{i}/{len(image_paths)}] Failed to process {path.name}: {exc}")
 
     print("-" * 50)
     print("Summary:")
