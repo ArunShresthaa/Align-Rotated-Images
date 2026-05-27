@@ -2,7 +2,7 @@ import argparse
 import sys
 from pathlib import Path
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 
 from PIL import Image, ImageTk
 
@@ -53,17 +53,18 @@ class ImageUprightApp:
         try:
             self.root.lift()
             # focus after a short delay so the window has time to appear
-            self.root.after(150, lambda: (self.root.focus_force(), self.image_label.focus_set()))
+            self.root.after(150, lambda: (
+                self.root.focus_force(), self.image_label.focus_set()))
         except Exception:
             pass
 
     def _check_and_convert_to_png(self) -> bool:
         paths = self._load_image_paths(self.folder)
         non_pngs = [p for p in paths if p.suffix.lower() != ".png"]
-        
+
         if not non_pngs:
             return True
-            
+
         msg = (
             f"Found {len(non_pngs)} non-PNG images.\n\n"
             "For highest quality OCR segmentation, it is recommended to "
@@ -71,7 +72,24 @@ class ImageUprightApp:
             "Convert them now? (Original non-PNG files will be DELETED)"
         )
         if messagebox.askyesno("Convert to PNG?", msg):
-            for p in non_pngs:
+            progress_window = tk.Toplevel(self.root)
+            progress_window.title("Converting Images")
+            progress_window.geometry("400x100")
+            # We don't make it transient because the root window is withdrawn right now.
+            progress_window.grab_set()
+
+            # Make sure it appears immediately
+            progress_window.update()
+
+            lbl = tk.Label(progress_window, text="Converting...")
+            lbl.pack(pady=10)
+
+            progress = ttk.Progressbar(
+                progress_window, orient="horizontal", length=300, mode="determinate")
+            progress.pack(pady=10)
+            progress["maximum"] = len(non_pngs)
+
+            for i, p in enumerate(non_pngs):
                 try:
                     with Image.open(p) as img:
                         save_kwargs = {}
@@ -82,10 +100,16 @@ class ImageUprightApp:
                     p.unlink()  # delete the original
                 except Exception as exc:
                     print(f"Failed to convert {p}: {exc}")
+
+                progress["value"] = i + 1
+                lbl.config(text=f"Converted {i + 1}/{len(non_pngs)}")
+                progress_window.update()
+
+            progress_window.destroy()
         else:
             if not messagebox.askyesno("Continue?", "Proceed without converting? (Quality may degrade on rotation)"):
                 return False
-                
+
         return True
 
     @staticmethod
@@ -226,8 +250,22 @@ class ImageUprightApp:
         if not messagebox.askyesno("Confirm Bulk Rotate", f"Rotate ALL LANDSCAPE images by {degrees} degrees?\nThis might take a moment."):
             return
 
+        progress_window = tk.Toplevel(self.root)
+        progress_window.title("Rotating Images")
+        progress_window.geometry("400x100")
+        progress_window.transient(self.root)
+        progress_window.grab_set()
+
+        lbl = tk.Label(progress_window, text="Processing...")
+        lbl.pack(pady=10)
+
+        progress = ttk.Progressbar(
+            progress_window, orient="horizontal", length=300, mode="determinate")
+        progress.pack(pady=10)
+        progress["maximum"] = len(self.image_paths)
+
         rotated_count = 0
-        for path in self.image_paths:
+        for i, path in enumerate(self.image_paths):
             try:
                 with Image.open(path) as img:
                     if img.width > img.height:
@@ -235,7 +273,7 @@ class ImageUprightApp:
                         save_kwargs = {}
                         if "exif" in img.info:
                             save_kwargs["exif"] = img.info["exif"]
-                        
+
                         if path.suffix.lower() in {".jpg", ".jpeg"}:
                             save_kwargs["quality"] = "keep"
                             save_kwargs["subsampling"] = "keep"
@@ -245,8 +283,15 @@ class ImageUprightApp:
             except Exception as exc:
                 print(f"Failed to bulk rotate {path}: {exc}")
 
+            progress["value"] = i + 1
+            lbl.config(text=f"Processed {i + 1}/{len(self.image_paths)}")
+            progress_window.update()
+
+        progress_window.destroy()
+
         self._show_current_image()
-        messagebox.showinfo("Done", f"Successfully rotated {rotated_count} landscape images.")
+        messagebox.showinfo(
+            "Done", f"Successfully rotated {rotated_count} landscape images.")
 
     def rotate_current(self, degrees: int):
         if self.current_image is None:
@@ -261,7 +306,7 @@ class ImageUprightApp:
             save_kwargs = {}
             if "exif" in self.current_image.info:
                 save_kwargs["exif"] = self.current_image.info["exif"]
-            
+
             if path.suffix.lower() in {".jpg", ".jpeg"}:
                 save_kwargs["quality"] = "keep"
                 save_kwargs["subsampling"] = "keep"
