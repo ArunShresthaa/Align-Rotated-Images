@@ -22,6 +22,13 @@ class ImageUprightApp:
     def __init__(self, root: tk.Tk, folder: Path):
         self.root = root
         self.folder = folder
+
+        self.root.withdraw()
+        if not self._check_and_convert_to_png():
+            self.root.destroy()
+            return
+        self.root.deiconify()
+
         self.image_paths = self._load_image_paths(folder)
 
         if not self.image_paths:
@@ -49,6 +56,37 @@ class ImageUprightApp:
             self.root.after(150, lambda: (self.root.focus_force(), self.image_label.focus_set()))
         except Exception:
             pass
+
+    def _check_and_convert_to_png(self) -> bool:
+        paths = self._load_image_paths(self.folder)
+        non_pngs = [p for p in paths if p.suffix.lower() != ".png"]
+        
+        if not non_pngs:
+            return True
+            
+        msg = (
+            f"Found {len(non_pngs)} non-PNG images.\n\n"
+            "For highest quality OCR segmentation, it is recommended to "
+            "convert these to PNG format to avoid generation loss upon rotation.\n\n"
+            "Convert them now? (Original non-PNG files will be DELETED)"
+        )
+        if messagebox.askyesno("Convert to PNG?", msg):
+            for p in non_pngs:
+                try:
+                    with Image.open(p) as img:
+                        save_kwargs = {}
+                        if "exif" in img.info:
+                            save_kwargs["exif"] = img.info["exif"]
+                        png_path = p.with_suffix(".png")
+                        img.save(png_path, **save_kwargs)
+                    p.unlink()  # delete the original
+                except Exception as exc:
+                    print(f"Failed to convert {p}: {exc}")
+        else:
+            if not messagebox.askyesno("Continue?", "Proceed without converting? (Quality may degrade on rotation)"):
+                return False
+                
+        return True
 
     @staticmethod
     def _load_image_paths(folder: Path):
